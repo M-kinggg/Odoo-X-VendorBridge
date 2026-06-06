@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="VendorBridge — Quotation Comparison, Contract Approval, and Deal Chat." />
+  <title>VendorBridge — Contract Approval</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+
+{% if not session.get('role') %}
+  <script>window.location.replace("/");</script>
+  <noscript><meta http-equiv="refresh" content="0;url=/" /></noscript>
+{% else %}
+
+<!-- ===== NAVBAR ===== -->
+<header>
+  <nav class="navbar" role="navigation" aria-label="Approval Navigation">
+    <a class="navbar-brand" href="/" aria-label="VendorBridge home">
+      <div class="brand-icon" aria-hidden="true">VB</div>
+      VendorBridge
+    </a>
+
+    <ul class="navbar-links" role="list">
+      {% if session.get('role') == 'company' %}
+        <li><a href="/company"  class="nav-link">Dashboard</a></li>
+        <li><a href="/approval" class="nav-link active" aria-current="page">Approvals</a></li>
+      {% else %}
+        <li><a href="/vendor"   class="nav-link">Marketplace</a></li>
+        <li><a href="/approval" class="nav-link active" aria-current="page">My Bids</a></li>
+      {% endif %}
+    </ul>
+
+    <div class="navbar-right">
+      {% if session.get('role') == 'company' %}
+        <span class="nav-badge">&#127970;&nbsp; Company</span>
+      {% else %}
+        <span class="nav-badge">&#128188;&nbsp; Vendor</span>
+      {% endif %}
+
+      <div class="nav-user-info">
+        <span class="nav-user-name">{{ session.get('username', 'User') }}</span>
+        <span class="nav-user-role">{{ session.get('role', '') | capitalize }} Account</span>
+      </div>
+
+      <div class="nav-avatar" aria-hidden="true">
+        {{ session.get('username', 'US')[0:2] | upper }}
+      </div>
+
+      <form action="/logout" method="POST" style="margin:0;">
+        <button type="submit" class="btn-logout" id="approval-logout-btn">&#9168;&nbsp; Logout</button>
+      </form>
+    </div>
+  </nav>
+</header>
+
+<!-- ===== MAIN ===== -->
+<main class="page-wrapper">
+
+  <!-- Page Header -->
+  <div class="page-header animate-in">
+    <h1 class="page-title">
+      {% if rfq %}
+        Bids for &ldquo;{{ rfq.item_name }}&rdquo;
+      {% else %}
+        Quotation Comparison
+      {% endif %}
+    </h1>
+    <p class="page-subtitle">
+      {% if rfq %}
+        Request #{{ rfq.id }} &mdash; Deadline:
+        <strong style="color:#ffca28;">{{ rfq.deadline }}</strong>
+      {% else %}
+        Review and compare vendor bids across all requests.
+      {% endif %}
+    </p>
+  </div>
+
+  <!-- Flash Messages -->
+  {% with messages_flash = get_flashed_messages(with_categories=true) %}
+    {% if messages_flash %}
+      {% for category, message in messages_flash %}
+        <div class="flash flash-{{ category }}" role="alert">&#9679;&nbsp; {{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  {# ══════════════════════════════════════════════════
+     DEAL COMPLETED BANNER (shown when status=Completed)
+     ══════════════════════════════════════════════════ #}
+  {% if rfq and rfq.status == 'Completed' %}
+    {% set winner = bids | selectattr('is_approved', 'equalto', 1) | list | first %}
+    <div class="deal-completed-banner" role="status" aria-live="polite">
+      <div class="deal-completed-icon">&#127881;</div>
+      <div class="deal-completed-text">
+        <div class="deal-completed-title">
+          &#10003;&nbsp; Deal Completed &mdash; Contract Awarded!
+        </div>
+        <div class="deal-completed-meta">
+          {% if winner %}
+            Awarded to <strong>{{ winner.vendor_name }}</strong>
+            for <strong>${{ "%.2f" | format(winner.price) }}</strong>
+            with <strong>{{ winner.delivery_days }}-day</strong> delivery.
+          {% else %}
+            This contract has been finalized and marked as completed.
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  <!-- Vendor read-only notice -->
+  {% if session.get('role') == 'vendor' %}
+    <div class="flash flash-info" role="note">
+      &#9432;&nbsp; You are in <strong>Vendor view</strong>.
+      Contract approval is restricted to Company accounts.
+      Use the chat below to request deadline extensions or ask questions.
+    </div>
+  {% endif %}
+
+  <!-- Stats Row -->
+  <div class="stats-grid animate-in animate-delay-1">
+    <div class="stat-card">
+      <span class="stat-label">Total Bids</span>
+      <span class="stat-value">{{ bids | length }}</span>
+      <span class="stat-delta">Received quotations</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Lowest Bid</span>
+      <span class="stat-value">
+        {% if bids %}${{ "%.0f" | format(bids | map(attribute='price') | list | min) }}
+        {% else %}&#8212;{% endif %}
+      </span>
+      <span class="stat-delta">Best price available</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Fastest Delivery</span>
+      <span class="stat-value">
+        {% if bids %}{{ bids | map(attribute='delivery_days') | list | min }}d
+        {% else %}&#8212;{% endif %}
+      </span>
+      <span class="stat-delta">Shortest lead time</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Status</span>
+      {% if rfq %}
+        <span class="stat-value" style="font-size:1.1rem;">
+          {% if rfq.status == 'Completed' %}
+            <span style="color:var(--text-accent);">Completed</span>
+          {% elif rfq.status == 'Open' %}
+            <span style="color:#ffca28;">Open</span>
+          {% else %}
+            <span style="color:var(--text-secondary);">{{ rfq.status }}</span>
+          {% endif %}
+        </span>
+      {% else %}
+        <span class="stat-value" style="font-size:1.1rem; color:var(--amber);">—</span>
+      {% endif %}
+      <span class="stat-delta">Request status</span>
+    </div>
+  </div>
+
+  <!-- ===== BID COMPARISON TABLE ===== -->
+  <section class="card animate-in animate-delay-2" id="bid-table" aria-labelledby="bids-title">
+    <div class="card-header">
+      <h2 class="card-title" id="bids-title">
+        <span class="card-title-icon" aria-hidden="true">&#9741;</span>
+        Vendor Bid Comparison
+      </h2>
+      <span class="text-muted">{{ bids | length }} bid(s)</span>
+    </div>
+
+    {% if bids %}
+      <div class="table-wrapper">
+        <table id="quotation-table" aria-label="Vendor quotation comparison">
+          <thead>
+            <tr>
+              <th scope="col">Rank</th>
+              <th scope="col">Vendor Name</th>
+              <th scope="col">Quoted Price</th>
+              <th scope="col">Delivery Time</th>
+              <th scope="col">Notes</th>
+              {% if session.get('role') == 'company' and rfq and rfq.status != 'Completed' %}
+                <th scope="col" class="text-right">Decision</th>
+              {% elif rfq and rfq.status == 'Completed' %}
+                <th scope="col">Result</th>
+              {% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for bid in bids %}
+            <tr class="{{ 'bid-winner-row' if bid.is_approved == 1 else '' }}">
+
+              <!-- Rank -->
+              <td class="td-id">
+                {% if bid.is_approved == 1 %}
+                  &#127941;
+                {% elif loop.index == 1 %}#1
+                {% elif loop.index == 2 %}#2
+                {% elif loop.index == 3 %}#3
+                {% else %}#{{ loop.index }}{% endif %}
+              </td>
+
+              <!-- Vendor Name -->
+              <td>
+                <strong>{{ bid.vendor_name }}</strong>
+                {% if bid.is_approved == 1 %}
+                  <span class="winner-tag">&#10003; Awarded</span>
+                {% elif loop.first and rfq and rfq.status != 'Completed' %}
+                  <span class="winner-tag">&#9733; Best Price</span>
+                {% endif %}
+              </td>
+
+              <!-- Price -->
+              <td class="td-price">${{ "%.2f" | format(bid.price) }}</td>
+
+              <!-- Delivery -->
+              <td>
+                <span class="delivery-pill">
+                  {{ bid.delivery_days }} day{{ 's' if bid.delivery_days != 1 else '' }}
+                </span>
+              </td>
+
+              <!-- Notes -->
+              <td>
+                {% if bid.notes %}
+                  <span style="font-size:0.8rem; color:var(--text-secondary);">
+                    {{ bid.notes | truncate(60) }}
+                  </span>
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+
+              {# ── Approve button — company only, only if not yet completed ── #}
+              {% if session.get('role') == 'company' and rfq and rfq.status != 'Completed' %}
+              <td class="text-right">
+                <form
+                  action="/approve_bid"
+                  method="POST"
+                  style="display:inline;"
+                  id="approve-form-{{ loop.index }}"
+                  onsubmit="return confirm('Award contract to {{ bid.vendor_name }} for ${{ "%.2f" | format(bid.price) }}?');"
+                >
+                  <input type="hidden" name="bid_id"  value="{{ bid.id }}" />
+                  <input type="hidden" name="req_id"  value="{{ rfq.id }}" />
+                  <button
+                    type="submit"
+                    class="btn btn-sm btn-primary"
+                    id="approve-btn-{{ loop.index }}"
+                    aria-label="Approve contract with {{ bid.vendor_name }}"
+                  >
+                    &#10003;&nbsp; Approve Contract
+                  </button>
+                </form>
+              </td>
+
+              {# ── Result column when deal is completed ── #}
+              {% elif rfq and rfq.status == 'Completed' %}
+              <td>
+                {% if bid.is_approved == 1 %}
+                  <span class="badge badge-completed">&#127881; Deal Completed</span>
+                {% else %}
+                  <span class="badge badge-closed">Not Selected</span>
+                {% endif %}
+              </td>
+              {% endif %}
+
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if session.get('role') == 'company' and rfq and rfq.status != 'Completed' %}
+        <p class="text-muted mt-4" style="padding-top:12px; border-top:1px solid var(--border-subtle);">
+          &#9432;&nbsp; Approving a contract marks the deal as <strong>Completed</strong>,
+          notifies the vendor via chat, and closes this RFQ. This cannot be undone.
+        </p>
+      {% endif %}
+
+    {% else %}
+      <div class="empty-state">
+        <div class="empty-state-icon" aria-hidden="true">&#128203;</div>
+        <p class="empty-state-title">No bids received yet</p>
+        <p class="empty-state-text">
+          Bids will appear here once vendors submit quotations for this request.
+        </p>
+      </div>
+    {% endif %}
+  </section>
+
+  {# ══════════════════════════════════════════════════════════════════
+     CHAT PANEL — only shown when a specific req_id is provided
+     ══════════════════════════════════════════════════════════════════ #}
+  {% if rfq %}
+  <section class="chat-section animate-in animate-delay-3" id="chat" aria-labelledby="chat-title">
+
+    <!-- Deadline extension quick-prompt for vendors -->
+    {% if session.get('role') == 'vendor' and rfq.status != 'Completed' %}
+    <div class="extension-prompt">
+      &#9888;&nbsp; Need more time than the deadline allows?
+      <button
+        class="quick-msg-btn"
+        type="button"
+        onclick="fillQuickMsg('Hi, I need to request a deadline extension for this RFQ. Could we discuss extending the deadline by a few days? Thank you.')"
+      >
+        &#128172;&nbsp; Request Extension
+      </button>
+    </div>
+    <div style="height:10px;"></div>
+    {% endif %}
+
+    <div class="chat-panel">
+      <!-- Chat Header -->
+      <div class="chat-header">
+        <div class="chat-header-title">
+          <span class="chat-header-icon" aria-hidden="true">&#128172;</span>
+          Deal Chat &mdash; Request #{{ rfq.id }}
+          <span class="chat-badge">{{ messages | length }} message{{ 's' if messages | length != 1 else '' }}</span>
+        </div>
+        <span class="text-muted" style="font-size:0.78rem;">
+          Company &amp; vendor can message here
+        </span>
+      </div>
+
+      <!-- Messages -->
+      <div class="chat-messages" id="chat-messages-box" aria-live="polite" aria-label="Chat messages">
+        {% if messages %}
+          {% for msg in messages %}
+          <div class="chat-bubble {{ msg.sender_role }}">
+            <div class="chat-bubble-meta">
+              <span class="chat-bubble-sender">{{ msg.sender }}</span>
+              <span class="chat-bubble-role {{ msg.sender_role }}">
+                {{ msg.sender_role | capitalize }}
+              </span>
+            </div>
+            <div class="chat-bubble-body">{{ msg.message }}</div>
+            <span class="chat-bubble-time">{{ msg.sent_at }}</span>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="chat-empty">
+            <div class="chat-empty-icon" aria-hidden="true">&#128172;</div>
+            <p class="chat-empty-text">
+              No messages yet. Start the conversation below.<br />
+              Use this chat to negotiate deadlines or ask questions.
+            </p>
+          </div>
+        {% endif %}
+      </div>
+
+      <!-- Chat Input Form -->
+      <form
+        id="chat-form"
+        action="/send_message"
+        method="POST"
+        class="chat-form"
+        onsubmit="return validateChat();"
+      >
+        <input type="hidden" name="request_id" value="{{ rfq.id }}" />
+
+        <div class="chat-input-wrap">
+          <label for="chat-message-input">
+            Messaging as <strong>{{ session.get('username') }}</strong>
+            ({{ session.get('role') | capitalize }})
+          </label>
+          <textarea
+            id="chat-message-input"
+            name="message"
+            class="chat-textarea"
+            placeholder="Type your message… (e.g. request deadline extension, confirm details)"
+            required
+            maxlength="1000"
+            rows="2"
+            aria-required="true"
+          ></textarea>
+        </div>
+
+        <button type="submit" class="btn btn-primary chat-send-btn" id="chat-send-btn">
+          &#9658;&nbsp; Send
+        </button>
+      </form>
+    </div>
+  </section>
+  {% endif %}
+
+  <!-- Navigation Footer -->
+  <div class="flex gap-2" style="margin-top:8px;">
+    {% if session.get('role') == 'company' %}
+      <a href="/company" class="btn btn-ghost">&#8592;&nbsp; Back to Dashboard</a>
+    {% else %}
+      <a href="/vendor"  class="btn btn-ghost">&#8592;&nbsp; Back to Marketplace</a>
+    {% endif %}
+  </div>
+
+</main>
+
+{% endif %}{# end role guard #}
+
+<script>
+  /* Auto-scroll chat to bottom on load */
+  (function() {
+    var box = document.getElementById('chat-messages-box');
+    if (box) box.scrollTop = box.scrollHeight;
+  })();
+
+  /* Fill quick-message text (deadline extension shortcut) */
+  function fillQuickMsg(text) {
+    var ta = document.getElementById('chat-message-input');
+    if (ta) {
+      ta.value = text;
+      ta.focus();
+      ta.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+
+  /* Validate chat form before submit */
+  function validateChat() {
+    var ta = document.getElementById('chat-message-input');
+    if (!ta || !ta.value.trim()) {
+      ta.focus();
+      return false;
+    }
+    return true;
+  }
+</script>
+
+
+<script src="{{ url_for('static', filename='smooth.js') }}"></script>
+</body>
+</html>
